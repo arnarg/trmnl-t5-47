@@ -23,7 +23,7 @@
 #define DISPLAY_HEIGHT      540
 
 // Battery
-#define BATTERY_ADC_PIN     14
+#define BATTERY_ADC_PIN     36
 #define BATTERY_LOW_VOLTAGE 3.3f
 
 // Button

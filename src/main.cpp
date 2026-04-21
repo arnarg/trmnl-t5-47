@@ -69,6 +69,9 @@ void setup() {
         esp_deep_sleep_start();
     }
 
+    // Init battery ADC
+    battery.init();
+
     // Open NVS
     if (!configStore.begin()) {
         showErrorAndSleep("Storage Error", "Failed to open NVS storage", "Device will retry", ERROR_REFRESH_RATE);
@@ -116,7 +119,9 @@ void setup() {
         }
     }
 
-    // WiFi config exists — connect
+    // WiFi config exists — read battery before connecting (ADC2 conflicts with WiFi)
+    float battVoltage = battery.readVoltage();
+
     String ssid = configStore.getWifiSSID();
     String pass = configStore.getWifiPass();
 
@@ -141,7 +146,6 @@ void setup() {
     String apiKey = configStore.getApiKey();
     String friendlyId = configStore.getFriendlyId();
     uint32_t refreshRate = configStore.getRefreshRate();
-    float battVoltage = battery.readVoltage();
     int rssi = WiFi.RSSI();
 
     Serial.printf("[TRMNL] MAC: %s, API: %s, Battery: %.2fV, RSSI: %d\n",
