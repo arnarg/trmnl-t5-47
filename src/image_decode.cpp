@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <PNGdec.h>
+#include <new>
 
 // PNG decode callback context
 struct PngContext {
@@ -313,7 +314,8 @@ DecodeResult ImageDecoder::decodeBMP(uint8_t *data, size_t length, uint8_t *fram
 }
 
 DecodeResult ImageDecoder::decodePNG(uint8_t *data, size_t length, uint8_t *framebuffer, int fbWidth, int fbHeight) {
-    PNG *png = new PNG();
+    // nothrow so allocation failure returns nullptr instead of aborting
+    PNG *png = new (std::nothrow) PNG();
     if (!png) {
         Serial.println("[TRMNL] Failed to allocate PNG decoder");
         return DecodeResult::OUT_OF_MEMORY;
@@ -322,7 +324,7 @@ DecodeResult ImageDecoder::decodePNG(uint8_t *data, size_t length, uint8_t *fram
     int rc = png->openRAM(data, length, pngDrawCallback);
     if (rc != PNG_SUCCESS) {
         Serial.printf("[TRMNL] PNG open failed: %d\n", rc);
-        free(png);
+        delete png;
         return DecodeResult::DECODE_FAILED;
     }
 
@@ -342,7 +344,7 @@ DecodeResult ImageDecoder::decodePNG(uint8_t *data, size_t length, uint8_t *fram
 
     rc = png->decode(&ctx, 0);
     png->close();
-    free(png);
+    delete png;
 
     if (rc != PNG_SUCCESS) {
         Serial.printf("[TRMNL] PNG decode failed: %d\n", rc);
