@@ -66,6 +66,27 @@ bool ConfigStore::setRefreshRate(uint32_t val) {
     return _prefs.putUInt("refresh_rate", val) > 0;
 }
 
+// The setters below only write when the value changes, since they run on
+// most wakes and NVS writes cost flash wear and power.
+String ConfigStore::getLastImage() {
+    return _prefs.getString("last_image", "");
+}
+
+void ConfigStore::setLastImage(const String &val) {
+    if (getLastImage() == val) return;
+    if (val.length() == 0) _prefs.remove("last_image");
+    else _prefs.putString("last_image", val);
+}
+
+uint8_t ConfigStore::getFailCount() {
+    return _prefs.getUChar("fail_count", 0);
+}
+
+void ConfigStore::setFailCount(uint8_t val) {
+    if (getFailCount() == val) return;
+    _prefs.putUChar("fail_count", val);
+}
+
 void ConfigStore::clearAll() {
     _prefs.clear();
 }

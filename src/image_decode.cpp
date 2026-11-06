@@ -26,84 +26,87 @@ void ImageDecoder::setPixel4bpp(uint8_t *fb, int fbWidth, int x, int y, uint8_t 
     }
 }
 
-// PNGdec draw callback
+// Read sample number `idx` from a packed PNG scanline with the given bit depth
+// (bits per channel: 1, 2, 4, 8 or 16). With `scale`, the value is expanded to
+// 0-255; without it the raw value is returned (used for palette indices).
+// 16-bit samples are big-endian, so the first byte is the high byte.
+static inline uint8_t pngSample(const uint8_t *line, int idx, int depth, bool scale) {
+    switch (depth) {
+        case 1: {
+            uint8_t v = (line[idx >> 3] >> (7 - (idx & 7))) & 0x01;
+            return scale ? v * 255 : v;
+        }
+        case 2: {
+            uint8_t v = (line[idx >> 2] >> (6 - 2 * (idx & 3))) & 0x03;
+            return scale ? v * 85 : v;
+        }
+        case 4: {
+            uint8_t v = (line[idx >> 1] >> (4 - 4 * (idx & 1))) & 0x0F;
+            return scale ? v * 17 : v;
+        }
+        case 16:
+            return line[idx * 2];
+        default: // 8
+            return line[idx];
+    }
+}
+
+// Rec. 601 luma with integer weights (77 + 150 + 29 = 256)
+static inline uint8_t luma(uint8_t r, uint8_t g, uint8_t b) {
+    return (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+}
+
+// Composite a gray value over a white background (the e-paper's blank color)
+static inline uint8_t overWhite(uint8_t gray, uint8_t alpha) {
+    return (uint8_t)((gray * alpha + 255 * (255 - alpha)) / 255);
+}
+
+// PNGdec draw callback. Note: pDraw->iBpp is bits per *channel* (PNG bit
+// depth), not bits per pixel, so the pixel layout depends on iPixelType too.
 static int pngDrawCallback(PNGDRAW *pDraw) {
     PngContext *ctx = (PngContext *)pDraw->pUser;
     int destY = ctx->offsetY + pDraw->y;
     if (destY < 0 || destY >= ctx->fbHeight) return 0;
 
-    uint8_t *line = pDraw->pPixels;
+    const uint8_t *line = pDraw->pPixels;
+    const uint8_t *palette = pDraw->pPalette; // RGB triplets, then 256 alpha bytes at +768
     int srcWidth = pDraw->iWidth;
+    int depth = pDraw->iBpp;
 
     for (int i = 0; i < srcWidth; i++) {
         int destX = ctx->offsetX + i;
         if (destX < 0 || destX >= ctx->fbWidth) continue;
 
         uint8_t gray8;
-        if (pDraw->iPixelType == PNG_PIXEL_INDEXED) {
-            // Indexed PNG: extract palette index from packed pixels
-            uint8_t idx;
-            switch (pDraw->iBpp) {
-                case 1: {
-                    idx = (line[i / 8] >> (7 - (i & 7))) & 1;
-                    break;
-                }
-                case 2: {
-                    idx = (line[i / 4] >> (6 - (i & 3) * 2)) & 0x03;
-                    break;
-                }
-                case 4: {
-                    idx = (i & 1) ? (line[i / 2] & 0x0F) : ((line[i / 2] >> 4) & 0x0F);
-                    break;
-                }
-                case 8:
-                    idx = line[i];
-                    break;
-                default:
-                    idx = 0;
-                    break;
+        switch (pDraw->iPixelType) {
+            case PNG_PIXEL_GRAYSCALE:
+                gray8 = pngSample(line, i, depth, true);
+                break;
+            case PNG_PIXEL_TRUECOLOR:
+                gray8 = luma(pngSample(line, i * 3, depth, true),
+                             pngSample(line, i * 3 + 1, depth, true),
+                             pngSample(line, i * 3 + 2, depth, true));
+                break;
+            case PNG_PIXEL_INDEXED: {
+                uint8_t idx = pngSample(line, i, depth, false);
+                const uint8_t *rgb = palette + idx * 3;
+                gray8 = luma(rgb[0], rgb[1], rgb[2]);
+                if (pDraw->iHasAlpha) gray8 = overWhite(gray8, palette[768 + idx]);
+                break;
             }
-            // Palette is RGB triplets at pPalette[idx * 3]
-            uint8_t r = pDraw->pPalette[idx * 3];
-            uint8_t g = pDraw->pPalette[idx * 3 + 1];
-            uint8_t b = pDraw->pPalette[idx * 3 + 2];
-            gray8 = (uint8_t)(0.299f * r + 0.587f * g + 0.114f * b);
-        } else {
-            // Grayscale, truecolor, or gray+alpha
-            switch (pDraw->iBpp) {
-                case 1: { // 1-bit grayscale
-                    uint8_t bit = (line[i / 8] >> (7 - (i & 7))) & 1;
-                    gray8 = bit ? 255 : 0;
-                    break;
-                }
-                case 2: { // 2-bit grayscale
-                    uint8_t byte = line[i / 4];
-                    int shift = 6 - (i & 3) * 2;
-                    gray8 = ((byte >> shift) & 0x03) * 85; // 0->0, 1->85, 2->170, 3->255
-                    break;
-                }
-                case 4: { // 4-bit grayscale
-                    if (i & 1) gray8 = (line[i / 2] & 0x0F) * 17;
-                    else gray8 = ((line[i / 2] >> 4) & 0x0F) * 17;
-                    break;
-                }
-                case 8: // 8-bit grayscale
-                    gray8 = line[i];
-                    break;
-                case 24: { // RGB
-                    int off = i * 3;
-                    gray8 = (uint8_t)(0.299f * line[off] + 0.587f * line[off + 1] + 0.114f * line[off + 2]);
-                    break;
-                }
-                case 32: { // RGBA
-                    int off = i * 4;
-                    gray8 = (uint8_t)(0.299f * line[off] + 0.587f * line[off + 1] + 0.114f * line[off + 2]);
-                    break;
-                }
-                default:
-                    gray8 = 128;
-                    break;
-            }
+            case PNG_PIXEL_GRAY_ALPHA:
+                gray8 = overWhite(pngSample(line, i * 2, depth, true),
+                                  pngSample(line, i * 2 + 1, depth, true));
+                break;
+            case PNG_PIXEL_TRUECOLOR_ALPHA:
+                gray8 = overWhite(luma(pngSample(line, i * 4, depth, true),
+                                       pngSample(line, i * 4 + 1, depth, true),
+                                       pngSample(line, i * 4 + 2, depth, true)),
+                                  pngSample(line, i * 4 + 3, depth, true));
+                break;
+            default:
+                gray8 = 255;
+                break;
         }
 
         // Map 0-255 to 4-bit: 0x0=black, 0xF=white
@@ -325,7 +328,8 @@ DecodeResult ImageDecoder::decodePNG(uint8_t *data, size_t length, uint8_t *fram
 
     int imgWidth = png->getWidth();
     int imgHeight = png->getHeight();
-    Serial.printf("[TRMNL] PNG: %dx%d, bpp=%d\n", imgWidth, imgHeight, png->getBpp());
+    Serial.printf("[TRMNL] PNG: %dx%d, depth=%d, type=%d\n",
+                  imgWidth, imgHeight, png->getBpp(), png->getPixelType());
 
     PngContext ctx;
     ctx.framebuffer = framebuffer;

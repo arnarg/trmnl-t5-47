@@ -18,6 +18,14 @@
 #define SETUP_REFRESH_RATE   60
 #define ERROR_REFRESH_RATE   300
 
+// Retry backoff for transient failures (WiFi, network, server 5xx, image download).
+// The first QUIET_RETRY_COUNT failures leave the last good image on screen;
+// after that an error screen is shown once. Sleep doubles each failure:
+// RETRY_BASE_SEC, 2x, 4x, ... capped at RETRY_MAX_SEC.
+#define QUIET_RETRY_COUNT    3
+#define RETRY_BASE_SEC       60
+#define RETRY_MAX_SEC        3600
+
 // Display
 #define DISPLAY_WIDTH       960
 #define DISPLAY_HEIGHT      540

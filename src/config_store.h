@@ -25,6 +25,15 @@ public:
     bool setFriendlyId(const String &val);
     bool setRefreshRate(uint32_t val);
 
+    // Identifier (filename, or URL if no filename) of the /api/display image
+    // currently on the panel; empty when something else is on screen.
+    String getLastImage();
+    void setLastImage(const String &val);
+
+    // Consecutive transient failures (WiFi / network / server / image download)
+    uint8_t getFailCount();
+    void setFailCount(uint8_t val);
+
     void clearAll();
     void clearApiCredentials();
 
